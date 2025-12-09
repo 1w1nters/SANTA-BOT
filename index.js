@@ -9,16 +9,20 @@ import {
   TextInputBuilder,
   TextInputStyle,
   PermissionFlagsBits,
-  EmbedBuilder
+  EmbedBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } from 'discord.js';
 import reportService from './services/reportService.js';
 import uiService from './services/uiService.js';
-import playerRepository from './repositories/playerRepository.js'; // Подключили репо
+import playerRepository from './repositories/playerRepository.js';
+import questRepository from './repositories/questRepository.js';
 import { keepAlive } from './keep_alive.js';
 import 'dotenv/config';
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const REPORT_CHANNEL_ID = process.env.REPORT_CHANNEL_ID;
+const LOG_CHANNEL_ID = '1447931982087454892'; // Канал для логов регистрации
 
 const commands = [
   new SlashCommandBuilder()
@@ -38,9 +42,7 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  // --- COMMANDS ---
-
-  // /setup
+  // --- КОМАНДЫ ---
   if (interaction.isChatInputCommand() && interaction.commandName === 'setup') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return;
     await interaction.deferReply({ ephemeral: true });
@@ -48,18 +50,12 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.editReply('Панель обновлена.');
   }
 
-// /myinfo
   if (interaction.isChatInputCommand() && interaction.commandName === 'myinfo') {
     const player = playerRepository.getById(interaction.user.id);
-    
-    if (!player) {
-      return interaction.reply({ content: '❌ Ты не зарегистрирован. Жми кнопку на панели.', ephemeral: true });
-    }
+    if (!player) return interaction.reply({ content: '❌ Нет регистрации.', ephemeral: true });
 
-    // Считаем точную сумму наград за выполненные квесты
     let totalReward = 0;
     const questNames = [];
-
     player.completedQuests.forEach(qId => {
       const q = questRepository.getById(qId);
       if (q) {
@@ -74,95 +70,116 @@ client.on('interactionCreate', async (interaction) => {
       .addFields(
         { name: '📊 Выполнено', value: `${player.completedQuests.length}/10`, inline: true },
         { name: '💰 Заработано AZ', value: `${totalReward}`, inline: true },
-        { name: '✅ Список этапов', value: questNames.join('\n') || 'Нет выполненных заданий' }
+        { name: '✅ Этапы', value: questNames.join('\n') || 'Нет' }
       )
       .setThumbnail(interaction.user.displayAvatarURL());
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
-  // --- BUTTONS ---
-
-  // Кнопка: РЕГИСТРАЦИЯ
+  // --- КНОПКИ ---
   if (interaction.isButton() && interaction.customId === 'start_register') {
     const existing = playerRepository.getById(interaction.user.id);
-    if (existing) {
-      return interaction.reply({ content: `✅ Ты уже в системе под ником **${existing.nickname}**.`, ephemeral: true });
-    }
+    if (existing) return interaction.reply({ content: `✅ Ты уже в базе: **${existing.nickname}**.`, ephemeral: true });
 
-    const modal = new ModalBuilder().setCustomId('register_modal').setTitle('Регистрация Агента');
+    const modal = new ModalBuilder().setCustomId('register_modal').setTitle('Регистрация');
     const nickInput = new TextInputBuilder().setCustomId('reg_nick').setLabel('Твой Никнейм').setStyle(TextInputStyle.Short).setRequired(true);
-    const statsInput = new TextInputBuilder().setCustomId('reg_stats').setLabel('Скриншот статистики (/stats)').setStyle(TextInputStyle.Short).setPlaceholder('https://imgur.com/...').setRequired(true);
+    const statsInput = new TextInputBuilder().setCustomId('reg_stats').setLabel('Скрин /stats + /time').setStyle(TextInputStyle.Short).setPlaceholder('https://imgur.com/...').setRequired(true);
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(nickInput),
-      new ActionRowBuilder().addComponents(statsInput)
-    );
+    modal.addComponents(new ActionRowBuilder().addComponents(nickInput), new ActionRowBuilder().addComponents(statsInput));
     await interaction.showModal(modal);
   }
 
-  // Кнопка: СДАТЬ ОТЧЕТ
   if (interaction.isButton() && interaction.customId === 'start_report') {
     const player = playerRepository.getById(interaction.user.id);
-    if (!player) {
-      return interaction.reply({ content: '⛔ Сначала пройди регистрацию!', ephemeral: true });
-    }
+    if (!player) return interaction.reply({ content: '⛔ Сначала пройди регистрацию!', ephemeral: true });
 
     const modal = new ModalBuilder().setCustomId('report_modal').setTitle('Сдача отчета');
-    // Поля те же, что и были, но ник можно не спрашивать (берем из базы), 
-    // но для надежности лучше оставить или автозаполнять (нельзя в модалках).
-    // Оставим ввод квеста и док-в.
-    
     const questInput = new TextInputBuilder().setCustomId('quest_id').setLabel('Номер квеста (1-10)').setStyle(TextInputStyle.Short).setRequired(true);
     const proofInput = new TextInputBuilder().setCustomId('proof_link').setLabel('Доказательства').setStyle(TextInputStyle.Short).setRequired(true);
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(questInput),
-      new ActionRowBuilder().addComponents(proofInput)
-    );
+    modal.addComponents(new ActionRowBuilder().addComponents(questInput), new ActionRowBuilder().addComponents(proofInput));
     await interaction.showModal(modal);
   }
 
-  // --- MODALS ---
+  // Кнопка удаления (Admin Log)
+  if (interaction.isButton() && interaction.customId.startsWith('delete_user_')) {
+    // Проверка прав (кто нажал кнопку удаления)
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: 'Нет прав на удаление.', ephemeral: true });
+    }
 
-  // Сабмит РЕГИСТРАЦИИ
+    const targetId = interaction.customId.split('_')[2]; // delete_user_ID
+    const deleted = playerRepository.delete(targetId);
+
+    if (deleted) {
+      const embed = EmbedBuilder.from(interaction.message.embeds[0])
+        .setColor(0x000000)
+        .setTitle('❌ РЕГИСТРАЦИЯ ОТМЕНЕНА')
+        .setDescription(`Администратор <@${interaction.user.id}> удалил этого пользователя из базы.`);
+      
+      await interaction.update({ embeds: [embed], components: [] }); // Удаляем кнопку
+    } else {
+      await interaction.reply({ content: 'Пользователь уже удален или не найден.', ephemeral: true });
+    }
+  }
+
+  // --- МОДАЛКИ ---
   if (interaction.isModalSubmit() && interaction.customId === 'register_modal') {
     const nick = interaction.fields.getTextInputValue('reg_nick');
     const stats = interaction.fields.getTextInputValue('reg_stats');
 
-    playerRepository.create(interaction.user.id, nick, stats);
-    await interaction.reply({ content: '✅ Регистрация успешна. Теперь можешь сдавать отчеты.', ephemeral: true });
+    // 1. Сохраняем
+    const newPlayer = playerRepository.create(interaction.user.id, nick, stats);
+    await interaction.reply({ content: '✅ Регистрация успешна.', ephemeral: true });
+
+    // 2. Логируем
+    try {
+      const logChannel = await client.channels.fetch(LOG_CHANNEL_ID);
+      const logEmbed = new EmbedBuilder()
+        .setTitle('🆕 Новая регистрация')
+        .setColor(0x2ecc71)
+        .addFields(
+          { name: '👤 Ник', value: nick, inline: true },
+          { name: '🆔 Discord', value: `<@${interaction.user.id}>`, inline: true },
+          { name: '🔗 Статистика', value: stats }
+        )
+        .setTimestamp();
+      
+      // Кнопка удаления привязана к ID игрока
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`delete_user_${interaction.user.id}`)
+          .setLabel('❌ Удалить / Отменить')
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      await logChannel.send({ embeds: [logEmbed], components: [row] });
+    } catch (e) {
+      console.error('Ошибка логов:', e);
+    }
   }
 
-  // Сабмит ОТЧЕТА
   if (interaction.isModalSubmit() && interaction.customId === 'report_modal') {
     await interaction.deferReply({ ephemeral: true });
-
     try {
-      const player = playerRepository.getById(interaction.user.id); // Берем ник из базы
+      const player = playerRepository.getById(interaction.user.id);
       const questIdRaw = interaction.fields.getTextInputValue('quest_id');
       const proofUrl = interaction.fields.getTextInputValue('proof_link');
       const questId = parseInt(questIdRaw);
 
-      // Формируем отчет
       const embed = await reportService.createReportEmbed({
-        nickname: player.nickname, // Ник из регистрации
+        nickname: player.nickname,
         questId: questIdRaw,
         proofUrl,
         author: interaction.user,
       });
 
-      // Сохраняем прогресс (пока просто добавляем квест)
-      // В идеале: прогресс добавляет админ после проверки, но пока сделаем автоматическое зачисление при подаче (или просто отобразим отчет)
-      // Если хочешь чтобы засчитывалось ТОЛЬКО после проверки админом - это сложнее (нужны кнопки админа).
-      // Пока засчитаем сразу при подаче для теста /myinfo:
       playerRepository.addCompletedQuest(interaction.user.id, questId);
-
       const channel = await client.channels.fetch(REPORT_CHANNEL_ID);
       await channel.send({ embeds: [embed] });
-      await interaction.editReply('✅ Отчет отправлен и предварительно засчитан.');
+      await interaction.editReply('✅ Отчет отправлен.');
     } catch (e) {
-      console.error(e);
       await interaction.editReply(`Ошибка: ${e.message}`);
     }
   }
@@ -170,4 +187,3 @@ client.on('interactionCreate', async (interaction) => {
 
 keepAlive();
 client.login(process.env.DISCORD_TOKEN);
-
