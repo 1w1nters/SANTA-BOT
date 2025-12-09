@@ -16,7 +16,7 @@ class PlayerRepository {
         this.players = JSON.parse(data);
       }
     } catch (e) {
-      console.error('Ошибка чтения БД:', e);
+      console.error('Ошибка БД:', e);
       this.players = [];
     }
   }
@@ -34,7 +34,7 @@ class PlayerRepository {
       discordId,
       nickname,
       statsUrl,
-      completedQuests: [], // Массив ID выполненных квестов
+      completedQuests: [],
       joinedAt: new Date().toISOString()
     };
     this.players.push(player);
@@ -48,6 +48,17 @@ class PlayerRepository {
       player.completedQuests.push(questId);
       this.save();
     }
+  }
+
+  // Новый метод: Удаление
+  delete(discordId) {
+    const index = this.players.findIndex((p) => p.discordId === discordId);
+    if (index !== -1) {
+      this.players.splice(index, 1);
+      this.save();
+      return true;
+    }
+    return false;
   }
 }
 
