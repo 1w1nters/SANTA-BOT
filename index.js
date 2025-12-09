@@ -13,6 +13,7 @@ import {
   ButtonBuilder,
   ButtonStyle
 } from 'discord.js';
+import mongoose from 'mongoose'; // Добавили mongoose
 import reportService from './services/reportService.js';
 import uiService from './services/uiService.js';
 import playerRepository from './repositories/playerRepository.js';
@@ -22,7 +23,7 @@ import 'dotenv/config';
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const REPORT_CHANNEL_ID = process.env.REPORT_CHANNEL_ID;
-const LOG_CHANNEL_ID = '1447931982087454892'; // Канал для логов регистрации
+const LOG_CHANNEL_ID = '1447931982087454892'; 
 
 const commands = [
   new SlashCommandBuilder()
@@ -38,6 +39,19 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 client.once('ready', async () => {
   console.log(`System online: ${client.user.tag}`);
+  
+  // Подключение к MongoDB
+  if (!process.env.MONGO_URI) {
+    console.error('❌ ОШИБКА: Не указан MONGO_URI в переменных окружения!');
+  } else {
+    try {
+      await mongoose.connect(process.env.MONGO_URI);
+      console.log('✅ База данных подключена (MongoDB)');
+    } catch (err) {
+      console.error('❌ Ошибка подключения БД:', err);
+    }
+  }
+
   await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
 });
 
@@ -51,7 +65,8 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.isChatInputCommand() && interaction.commandName === 'myinfo') {
-    const player = playerRepository.getById(interaction.user.id);
+    // ! ИЗМЕНЕНИЕ: await перед вызовом репозитория
+    const player = await playerRepository.getById(interaction.user.id);
     if (!player) return interaction.reply({ content: '❌ Нет регистрации.', ephemeral: true });
 
     let totalReward = 0;
@@ -77,9 +92,10 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
-  // --- КНОПКИ ГЛАВНОГО МЕНЮ ---
+  // --- КНОПКИ ---
   if (interaction.isButton() && interaction.customId === 'start_register') {
-    const existing = playerRepository.getById(interaction.user.id);
+    // ! ИЗМЕНЕНИЕ: await
+    const existing = await playerRepository.getById(interaction.user.id);
     if (existing) return interaction.reply({ content: `✅ Ты уже в базе: **${existing.nickname}**.`, ephemeral: true });
 
     const modal = new ModalBuilder().setCustomId('register_modal').setTitle('Регистрация');
@@ -91,7 +107,8 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.isButton() && interaction.customId === 'start_report') {
-    const player = playerRepository.getById(interaction.user.id);
+    // ! ИЗМЕНЕНИЕ: await
+    const player = await playerRepository.getById(interaction.user.id);
     if (!player) return interaction.reply({ content: '⛔ Сначала пройди регистрацию!', ephemeral: true });
 
     const modal = new ModalBuilder().setCustomId('report_modal').setTitle('Сдача отчета');
@@ -102,16 +119,15 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.showModal(modal);
   }
 
-  // --- КНОПКИ АДМИНИСТРИРОВАНИЯ ---
-  
-  // Удаление пользователя (Admin Log)
+  // Админка: Удаление
   if (interaction.isButton() && interaction.customId.startsWith('delete_user_')) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({ content: 'Нет прав на удаление.', ephemeral: true });
     }
 
     const targetId = interaction.customId.split('_')[2];
-    const deleted = playerRepository.delete(targetId);
+    // ! ИЗМЕНЕНИЕ: await
+    const deleted = await playerRepository.delete(targetId);
 
     if (deleted) {
       const embed = EmbedBuilder.from(interaction.message.embeds[0])
@@ -125,11 +141,9 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // Выдача формы (Report Log)
+  // Кнопка выдачи формы
   if (interaction.isButton() && interaction.customId === 'give_reward') {
     const oldEmbed = interaction.message.embeds[0];
-
-    // Создаем строку с неактивной кнопкой и новым текстом
     const disabledRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('give_reward_done')
@@ -137,18 +151,16 @@ client.on('interactionCreate', async (interaction) => {
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(true)
     );
-
-    // Обновляем сообщение (embed остается старым, кнопки меняются)
     await interaction.update({ embeds: [oldEmbed], components: [disabledRow] });
   }
 
-  // --- МОДАЛКИ (ОБРАБОТКА ФОРМ) ---
-  
+  // --- МОДАЛКИ ---
   if (interaction.isModalSubmit() && interaction.customId === 'register_modal') {
     const nick = interaction.fields.getTextInputValue('reg_nick');
     const stats = interaction.fields.getTextInputValue('reg_stats');
 
-    const newPlayer = playerRepository.create(interaction.user.id, nick, stats);
+    // ! ИЗМЕНЕНИЕ: await
+    await playerRepository.create(interaction.user.id, nick, stats);
     await interaction.reply({ content: '✅ Регистрация успешна.', ephemeral: true });
 
     try {
@@ -179,7 +191,13 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isModalSubmit() && interaction.customId === 'report_modal') {
     await interaction.deferReply({ ephemeral: true });
     try {
-      const player = playerRepository.getById(interaction.user.id);
+      // ! ИЗМЕНЕНИЕ: await
+      const player = await playerRepository.getById(interaction.user.id);
+      if (!player) {
+         // На всякий случай проверка, если вдруг удалили пока он заполнял
+         return interaction.editReply('❌ Ошибка: Регистрация не найдена.');
+      }
+
       const questIdRaw = interaction.fields.getTextInputValue('quest_id');
       const proofUrl = interaction.fields.getTextInputValue('proof_link');
       const questId = parseInt(questIdRaw);
@@ -191,10 +209,10 @@ client.on('interactionCreate', async (interaction) => {
         author: interaction.user,
       });
 
-      playerRepository.addCompletedQuest(interaction.user.id, questId);
+      // ! ИЗМЕНЕНИЕ: await
+      await playerRepository.addCompletedQuest(interaction.user.id, questId);
+      
       const channel = await client.channels.fetch(REPORT_CHANNEL_ID);
-
-      // Добавляем кнопку "Выдать форму"
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('give_reward')
@@ -208,6 +226,17 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply(`Ошибка: ${e.message}`);
     }
   }
+});
+
+// --- ANTI-CRASH ---
+process.on('unhandledRejection', (reason, promise) => {
+  console.log(' [Anti-Crash] Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.log(' [Anti-Crash] Uncaught Exception:', err);
+});
+process.on('uncaughtExceptionMonitor', (err, origin) => {
+  console.log(' [Anti-Crash] Uncaught Exception Monitor:', err, origin);
 });
 
 keepAlive();
