@@ -1,4 +1,16 @@
-import { questsData } from '../data/quests.js';
+// Мы встроили данные прямо сюда, чтобы избежать ошибок с путями к файлам
+const questsData = [
+  { id: 1, title: 'Исчезновение Санты', reward: 150 },
+  { id: 2, title: 'Телепорт в беде', reward: 150 },
+  { id: 3, title: 'Потерянный список хороших детей', reward: 150 },
+  { id: 4, title: 'Переговоры с Гринчем', reward: 200 },
+  { id: 5, title: 'Лаборатория холодных следов', reward: 200 },
+  { id: 6, title: 'Охота за Ледяным Грабителем', reward: 200 },
+  { id: 7, title: 'Взлом морозной камеры', reward: 250 },
+  { id: 8, title: 'Побег из ледяной катакомбы', reward: 250 },
+  { id: 9, title: 'Ремонт саней и подготовка к вылету', reward: 250 },
+  { id: 10, title: 'Финальная битва: Спасти праздник', reward: 500 },
+];
 
 class QuestRepository {
   getAll() {
