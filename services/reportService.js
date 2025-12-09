@@ -1,38 +1,36 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { EmbedBuilder } from 'discord.js';
 import questRepository from '../repositories/questRepository.js';
+
 class ReportService {
-async createReportPayload(payload) {
-const { nickname, questId, proofUrl, author } = payload;
-const quest = questRepository.getById(parseInt(questId));
-  if (!quest) throw new Error('Квест не найден (ID 1-10).');
+  async createReportEmbed(payload) {
+    const { nickname, questId, proofUrl, author } = payload;
+    const quest = questRepository.getById(parseInt(questId));
 
-const adminCommand = `/givemydonateoff ${nickname} ${quest.reward}`;
+    if (!quest) throw new Error('Квест не найден (ID 1-10).');
 
-const embed = new EmbedBuilder()
-  .setColor(0x00ff00)
-  .setTitle(`📁 Новый отчет: ${quest.title}`)
-  .addFields(
-    { name: '👤 Никнейм', value: nickname, inline: true },
-    { name: '🆔 Discord', value: `<@${author.id}>`, inline: true },
-    { name: '📜 Квест', value: `**${quest.id}.** ${quest.title} (${quest.reward} AZ)` },
-    { name: '🔗 Доказательство', value: proofUrl },
-    { name: '💸 Команда выдачи', value: `\`\`\`${adminCommand}\`\`\`` }
-  )
-  .setTimestamp()
-  .setFooter({ text: 'Santa Ops | Admin Panel', iconURL: author.displayAvatarURL() });
+    // Формируем команду для админа
+    const adminCommand = `/givemydonateoff ${nickname} ${quest.reward}`;
 
-if (proofUrl.match(/\.(jpeg|jpg|gif|png)$/) != null) {
-  embed.setImage(proofUrl);
-}
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff00)
+      .setTitle(`📁 Новый отчет: ${quest.title}`)
+      .addFields(
+        { name: '👤 Никнейм', value: nickname, inline: true },
+        { name: '🆔 Discord', value: `<@${author.id}>`, inline: true },
+        { name: '📜 Квест', value: `**${quest.id}.** ${quest.title} (${quest.reward} AZ)` },
+        { name: '🔗 Доказательство', value: proofUrl },
+        { name: '💸 Команда выдачи', value: `\`\`\`${adminCommand}\`\`\`` }
+      )
+      .setTimestamp()
+      .setFooter({ text: 'Santa Ops | Admin Panel', iconURL: author.displayAvatarURL() });
 
-const row = new ActionRowBuilder().addComponents(
-  new ButtonBuilder()
-    .setCustomId('issue_reward')
-    .setLabel('Выдать форму')
-    .setStyle(ButtonStyle.Primary)
-);
+    // Простая проверка на картинку
+    if (proofUrl && proofUrl.match(/\.(jpeg|jpg|gif|png)$/) != null) {
+      embed.setImage(proofUrl);
+    }
 
-return { embeds: [embed], components: [row] };
+    return embed;
   }
 }
+
 export default new ReportService();
