@@ -21,7 +21,7 @@ import { keepAlive } from './keep_alive.js';
 import 'dotenv/config';
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const REPORT_CHANNEL_ID = process.env.REPORT_CHANNEL_ID;
-const LOG_CHANNEL_ID = '1447931982087454892';
+const LOG_CHANNEL_ID = '1447931982087454892'; // ID канала логов
 const commands = [
 new SlashCommandBuilder()
 .setName('setup')
@@ -89,7 +89,8 @@ const proofInput = new TextInputBuilder().setCustomId('proof_link').setLabel('Д
 
 modal.addComponents(new ActionRowBuilder().addComponents(questInput), new ActionRowBuilder().addComponents(proofInput));
 await interaction.showModal(modal);
-  }
+}
+// Кнопка удаления (Admin Log)
 if (interaction.isButton() && interaction.customId.startsWith('delete_user_')) {
 if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
 return interaction.reply({ content: 'Нет прав на удаление.', ephemeral: true });
@@ -107,10 +108,10 @@ if (deleted) {
 } else {
   await interaction.reply({ content: 'Пользователь уже удален или не найден.', ephemeral: true });
 }
-  }
-// Кнопка выдачи формы
+}
+// Кнопка выдачи формы (Admin Report)
 if (interaction.isButton() && interaction.customId === 'issue_reward') {
-// Можно добавить проверку прав админа здесь, если нужно
+// Делаем кнопку серой и меняем текст
 const disabledRow = new ActionRowBuilder().addComponents(
 new ButtonBuilder()
 .setCustomId('issue_reward_done')
@@ -119,7 +120,7 @@ new ButtonBuilder()
 .setDisabled(true)
 );
   await interaction.update({ components: [disabledRow] });
-  }
+}
 // --- МОДАЛКИ ---
 if (interaction.isModalSubmit() && interaction.customId === 'register_modal') {
 const nick = interaction.fields.getTextInputValue('reg_nick');
@@ -148,9 +149,9 @@ try {
 
   await logChannel.send({ embeds: [logEmbed], components: [row] });
 } catch (e) {
-  console.error('Ошибка логов:', e);
+  console.error('Ошибка логов регистрации:', e);
 }
-  }
+}
 if (interaction.isModalSubmit() && interaction.customId === 'report_modal') {
 await interaction.deferReply({ ephemeral: true });
 try {
@@ -158,7 +159,7 @@ const player = playerRepository.getById(interaction.user.id);
 const questIdRaw = interaction.fields.getTextInputValue('quest_id');
 const proofUrl = interaction.fields.getTextInputValue('proof_link');
 const questId = parseInt(questIdRaw);
-  // Получаем payload с кнопкой
+  // FIX: Вызываем createReportPayload, так как метод переименован
   const payload = await reportService.createReportPayload({
     nickname: player.nickname,
     questId: questIdRaw,
@@ -169,12 +170,14 @@ const questId = parseInt(questIdRaw);
   playerRepository.addCompletedQuest(interaction.user.id, questId);
   const channel = await client.channels.fetch(REPORT_CHANNEL_ID);
   
-  await channel.send(payload); // Отправляем embeds + components
+  // Отправляем payload (там внутри embeds и components)
+  await channel.send(payload);
   await interaction.editReply('✅ Отчет отправлен.');
 } catch (e) {
+  console.error(e);
   await interaction.editReply(`Ошибка: ${e.message}`);
 }
-  }
+}
 });
 keepAlive();
 client.login(process.env.DISCORD_TOKEN);
