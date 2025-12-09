@@ -1,73 +1,64 @@
-import fs from 'fs';
-import path from 'path';
+import mongoose from 'mongoose';
 
-// Используем простой путь в корне, если папка data не создана вручную
-// Это предотвратит ошибку "no such file or directory"
-const DB_PATH = path.resolve('./players.json');
+// Схема данных игрока в базе
+const playerSchema = new mongoose.Schema({
+  discordId: { type: String, required: true, unique: true },
+  nickname: { type: String, required: true },
+  statsUrl: { type: String, required: true },
+  completedQuests: { type: [Number], default: [] }, // Массив ID квестов
+  joinedAt: { type: Date, default: Date.now }
+});
+
+const PlayerModel = mongoose.model('Player', playerSchema);
 
 class PlayerRepository {
-  constructor() {
-    this.players = [];
-    this.load();
+  // Получить игрока (теперь это асинхронно!)
+  async getById(discordId) {
+    try {
+      return await PlayerModel.findOne({ discordId });
+    } catch (e) {
+      console.error('Ошибка поиска игрока:', e);
+      return null;
+    }
   }
 
-  load() {
+  // Создать игрока
+  async create(discordId, nickname, statsUrl) {
     try {
-      if (fs.existsSync(DB_PATH)) {
-        const data = fs.readFileSync(DB_PATH, 'utf8');
-        this.players = JSON.parse(data);
-      } else {
-        // Если файла нет, создаем пустой
-        this.save();
+      const newPlayer = await PlayerModel.create({
+        discordId,
+        nickname,
+        statsUrl
+      });
+      return newPlayer;
+    } catch (e) {
+      console.error('Ошибка создания игрока:', e);
+      return null;
+    }
+  }
+
+  // Добавить выполненный квест
+  async addCompletedQuest(discordId, questId) {
+    try {
+      const player = await this.getById(discordId);
+      if (player && !player.completedQuests.includes(questId)) {
+        player.completedQuests.push(questId);
+        await player.save();
       }
     } catch (e) {
-      console.error('Ошибка чтения БД (создаю новую):', e);
-      this.players = [];
-      this.save();
+      console.error('Ошибка обновления квестов:', e);
     }
   }
 
-  save() {
+  // Удалить игрока
+  async delete(discordId) {
     try {
-      fs.writeFileSync(DB_PATH, JSON.stringify(this.players, null, 2));
+      const result = await PlayerModel.deleteOne({ discordId });
+      return result.deletedCount > 0;
     } catch (e) {
-      console.error('Ошибка записи БД:', e);
+      console.error('Ошибка удаления:', e);
+      return false;
     }
-  }
-
-  getById(discordId) {
-    return this.players.find((p) => p.discordId === discordId);
-  }
-
-  create(discordId, nickname, statsUrl) {
-    const player = {
-      discordId,
-      nickname,
-      statsUrl,
-      completedQuests: [],
-      joinedAt: new Date().toISOString()
-    };
-    this.players.push(player);
-    this.save();
-    return player;
-  }
-
-  addCompletedQuest(discordId, questId) {
-    const player = this.getById(discordId);
-    if (player && !player.completedQuests.includes(questId)) {
-      player.completedQuests.push(questId);
-      this.save();
-    }
-  }
-
-  delete(discordId) {
-    const index = this.players.findIndex((p) => p.discordId === discordId);
-    if (index !== -1) {
-      this.players.splice(index, 1);
-      this.save();
-      return true;
-    }
-    return false;
   }
 }
 
