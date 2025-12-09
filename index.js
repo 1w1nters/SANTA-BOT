@@ -48,7 +48,7 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.editReply('Панель обновлена.');
   }
 
-  // /myinfo
+// /myinfo
   if (interaction.isChatInputCommand() && interaction.commandName === 'myinfo') {
     const player = playerRepository.getById(interaction.user.id);
     
@@ -56,17 +56,25 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Ты не зарегистрирован. Жми кнопку на панели.', ephemeral: true });
     }
 
-    const completedCount = player.completedQuests.length;
-    // Примерная награда: 50 монет за квест (кастомизируй)
-    const potentialReward = completedCount * 50; 
+    // Считаем точную сумму наград за выполненные квесты
+    let totalReward = 0;
+    const questNames = [];
+
+    player.completedQuests.forEach(qId => {
+      const q = questRepository.getById(qId);
+      if (q) {
+        totalReward += q.reward;
+        questNames.push(`${q.id} (${q.reward} AZ)`);
+      }
+    });
 
     const embed = new EmbedBuilder()
       .setTitle(`📁 Досье агента: ${player.nickname}`)
       .setColor(0x0099ff)
       .addFields(
-        { name: '📊 Прогресс', value: `${completedCount}/10 заданий`, inline: true },
-        { name: '💰 Награда к выдаче', value: `${potentialReward} AZ Coins`, inline: true },
-        { name: '🆔 Выполненные этапы', value: player.completedQuests.join(', ') || 'Нет' }
+        { name: '📊 Выполнено', value: `${player.completedQuests.length}/10`, inline: true },
+        { name: '💰 Заработано AZ', value: `${totalReward}`, inline: true },
+        { name: '✅ Список этапов', value: questNames.join('\n') || 'Нет выполненных заданий' }
       )
       .setThumbnail(interaction.user.displayAvatarURL());
 
@@ -162,3 +170,4 @@ client.on('interactionCreate', async (interaction) => {
 
 keepAlive();
 client.login(process.env.DISCORD_TOKEN);
+
