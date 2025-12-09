@@ -6,7 +6,10 @@ class ReportService {
     const { nickname, questId, proofUrl, author } = payload;
     const quest = questRepository.getById(parseInt(questId));
 
-    if (!quest) throw new Error('Квест не найден. Чекни ID.');
+    if (!quest) throw new Error('Квест не найден (ID 1-10).');
+
+    // Формируем команду для админа
+    const adminCommand = `/givemydonateoff ${nickname} ${quest.reward}`;
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
@@ -14,13 +17,13 @@ class ReportService {
       .addFields(
         { name: '👤 Никнейм', value: nickname, inline: true },
         { name: '🆔 Discord', value: `<@${author.id}>`, inline: true },
-        { name: '📜 Квест', value: `${quest.id}. ${quest.title}` },
-        { name: '🔗 Доказательство', value: proofUrl }
+        { name: '📜 Квест', value: `**${quest.id}.** ${quest.title} (${quest.reward} AZ)` },
+        { name: '🔗 Доказательство', value: proofUrl },
+        { name: '💸 Команда выдачи', value: `\`\`\`${adminCommand}\`\`\`` } // Копипаст для админа
       )
       .setTimestamp()
       .setFooter({ text: 'Santa Ops | Admin Panel', iconURL: author.displayAvatarURL() });
 
-    // Если это картинка, пытаемся отобразить
     if (proofUrl.match(/\.(jpeg|jpg|gif|png)$/) != null) {
       embed.setImage(proofUrl);
     }
