@@ -41,10 +41,9 @@ client.once('ready', async () => {
   console.log(`System online: ${client.user.tag}`);
   
   if (!process.env.MONGO_URI) {
-    console.error('❌ ОШИБКА: Не указан MONGO_URI!');
+    console.error('❌ ОШИБКА: Не указан MONGO_URI в Render! База данных не работает.');
   } else {
     try {
-      // Подключаемся, но не блокируем загрузку
       mongoose.connect(process.env.MONGO_URI)
         .then(() => console.log('✅ База данных подключена (MongoDB)'))
         .catch(err => console.error('❌ Ошибка подключения БД:', err));
@@ -62,17 +61,17 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'setup') {
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-        await interaction.deferReply({ ephemeral: true }); // Продлеваем тайм-аут
+        await interaction.deferReply({ ephemeral: true });
         await uiService.sendDashboard(interaction.channel);
         await interaction.editReply('Панель обновлена.');
       }
 
       if (interaction.commandName === 'myinfo') {
-        await interaction.deferReply({ ephemeral: true }); // Продлеваем тайм-аут
+        await interaction.deferReply({ ephemeral: true });
         const player = await playerRepository.getById(interaction.user.id);
         
         if (!player) {
-          return interaction.editReply('❌ Нет регистрации.');
+          return interaction.editReply('❌ Нет регистрации. Данные отсутствуют в базе.');
         }
 
         let totalReward = 0;
@@ -102,11 +101,8 @@ client.on('interactionCreate', async (interaction) => {
     // --- КНОПКИ ---
     if (interaction.isButton()) {
       
-      // 1. РЕГИСТРАЦИЯ
+      // 1. РЕГИСТРАЦИЯ (Открытие окна)
       if (interaction.customId === 'start_register') {
-        // ВАЖНО: Мы НЕ проверяем базу тут, чтобы окно открылось мгновенно.
-        // Проверку сделаем при отправке формы. Это спасет от ошибки 10062.
-        
         const modal = new ModalBuilder().setCustomId('register_modal').setTitle('Регистрация');
         const nickInput = new TextInputBuilder().setCustomId('reg_nick').setLabel('Твой Никнейм').setStyle(TextInputStyle.Short).setRequired(true);
         const statsInput = new TextInputBuilder().setCustomId('reg_stats').setLabel('Скрин /stats + /time').setStyle(TextInputStyle.Short).setPlaceholder('https://imgur.com/...').setRequired(true);
@@ -115,10 +111,8 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.showModal(modal);
       }
 
-      // 2. СДАЧА ОТЧЕТА
+      // 2. СДАЧА ОТЧЕТА (Открытие окна)
       if (interaction.customId === 'start_report') {
-        // Тоже открываем мгновенно, без проверок.
-        
         const modal = new ModalBuilder().setCustomId('report_modal').setTitle('Сдача отчета');
         const questInput = new TextInputBuilder().setCustomId('quest_id').setLabel('Номер квеста (1-10)').setStyle(TextInputStyle.Short).setRequired(true);
         const proofInput = new TextInputBuilder().setCustomId('proof_link').setLabel('Доказательства').setStyle(TextInputStyle.Short).setRequired(true);
@@ -127,10 +121,9 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.showModal(modal);
       }
 
-      // 3. УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ (Админка)
+      // 3. УДАЛЕНИЕ (Админка)
       if (interaction.customId.startsWith('delete_user_')) {
-        // Тут модалки нет, поэтому используем deferUpdate, чтобы кнопка не зависла
-        await interaction.deferUpdate(); 
+        await interaction.deferUpdate();
 
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
           return interaction.followUp({ content: 'Нет прав на удаление.', ephemeral: true });
@@ -153,7 +146,7 @@ client.on('interactionCreate', async (interaction) => {
 
       // 4. ВЫДАЧА НАГРАДЫ
       if (interaction.customId === 'give_reward') {
-        await interaction.deferUpdate(); // Говорим дискорду "подожди"
+        await interaction.deferUpdate();
         
         const oldEmbed = interaction.message.embeds[0];
         const disabledRow = new ActionRowBuilder().addComponents(
@@ -172,9 +165,9 @@ client.on('interactionCreate', async (interaction) => {
       
       // ОБРАБОТКА РЕГИСТРАЦИИ
       if (interaction.customId === 'register_modal') {
-        await interaction.deferReply({ ephemeral: true }); // Продлеваем время
+        await interaction.deferReply({ ephemeral: true });
 
-        // Вот тут проверяем, есть ли он уже в базе (перенесли проверку сюда)
+        // Проверка на дубликат
         const existing = await playerRepository.getById(interaction.user.id);
         if (existing) {
           return interaction.editReply(`⚠ Ты уже зарегистрирован как **${existing.nickname}**.`);
@@ -183,7 +176,14 @@ client.on('interactionCreate', async (interaction) => {
         const nick = interaction.fields.getTextInputValue('reg_nick');
         const stats = interaction.fields.getTextInputValue('reg_stats');
 
-        await playerRepository.create(interaction.user.id, nick, stats);
+        // Создаем игрока и проверяем результат!
+        const newPlayer = await playerRepository.create(interaction.user.id, nick, stats);
+
+        if (!newPlayer) {
+          // Если вернулся null, значит база данных отклонила запись
+          return interaction.editReply('❌ **Ошибка базы данных!** Регистрация не сохранена. Проверьте `MONGO_URI` или логи консоли.');
+        }
+
         await interaction.editReply('✅ Регистрация успешна.');
 
         try {
@@ -213,13 +213,12 @@ client.on('interactionCreate', async (interaction) => {
 
       // ОБРАБОТКА ОТЧЕТА
       if (interaction.customId === 'report_modal') {
-        await interaction.deferReply({ ephemeral: true }); // Продлеваем время
+        await interaction.deferReply({ ephemeral: true });
 
         const player = await playerRepository.getById(interaction.user.id);
         
-        // Проверка регистрации тут, а не на кнопке
         if (!player) {
-           return interaction.editReply('❌ Ошибка: Ты не зарегистрирован. Нажми кнопку "Регистрация".');
+           return interaction.editReply('❌ Ошибка: Ты не зарегистрирован в базе данных. Попробуй пройти регистрацию снова.');
         }
 
         try {
@@ -252,10 +251,9 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
   } catch (error) {
-    // Глобальный перехватчик ошибок взаимодействия, чтобы бот не падал
     console.error('Interaction Error:', error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'Произошла ошибка обработки.', ephemeral: true }).catch(() => {});
+      await interaction.reply({ content: 'Произошла критическая ошибка бота.', ephemeral: true }).catch(() => {});
     }
   }
 });
