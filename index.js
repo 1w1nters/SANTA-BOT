@@ -40,15 +40,15 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 client.once('ready', async () => {
   console.log(`System online: ${client.user.tag}`);
   
+  // Проверяем переменную
   if (!process.env.MONGO_URI) {
-    console.error('❌ ОШИБКА: Не указан MONGO_URI в Render! База данных не работает.');
+    console.error('❌ ОШИБКА: Переменная MONGO_URI не найдена в Render!');
   } else {
     try {
-      mongoose.connect(process.env.MONGO_URI)
-        .then(() => console.log('✅ База данных подключена (MongoDB)'))
-        .catch(err => console.error('❌ Ошибка подключения БД:', err));
+      await mongoose.connect(process.env.MONGO_URI);
+      console.log('✅ База данных подключена!');
     } catch (err) {
-      console.error('❌ Fatal DB Error:', err);
+      console.error('❌ Ошибка подключения при старте:', err.message);
     }
   }
 
@@ -101,53 +101,46 @@ client.on('interactionCreate', async (interaction) => {
     // --- КНОПКИ ---
     if (interaction.isButton()) {
       
-      // 1. РЕГИСТРАЦИЯ (Открытие окна)
+      // 1. РЕГИСТРАЦИЯ
       if (interaction.customId === 'start_register') {
         const modal = new ModalBuilder().setCustomId('register_modal').setTitle('Регистрация');
         const nickInput = new TextInputBuilder().setCustomId('reg_nick').setLabel('Твой Никнейм').setStyle(TextInputStyle.Short).setRequired(true);
         const statsInput = new TextInputBuilder().setCustomId('reg_stats').setLabel('Скрин /stats + /time').setStyle(TextInputStyle.Short).setPlaceholder('https://imgur.com/...').setRequired(true);
-
         modal.addComponents(new ActionRowBuilder().addComponents(nickInput), new ActionRowBuilder().addComponents(statsInput));
         await interaction.showModal(modal);
       }
 
-      // 2. СДАЧА ОТЧЕТА (Открытие окна)
+      // 2. СДАЧА ОТЧЕТА
       if (interaction.customId === 'start_report') {
         const modal = new ModalBuilder().setCustomId('report_modal').setTitle('Сдача отчета');
         const questInput = new TextInputBuilder().setCustomId('quest_id').setLabel('Номер квеста (1-10)').setStyle(TextInputStyle.Short).setRequired(true);
         const proofInput = new TextInputBuilder().setCustomId('proof_link').setLabel('Доказательства').setStyle(TextInputStyle.Short).setRequired(true);
-
         modal.addComponents(new ActionRowBuilder().addComponents(questInput), new ActionRowBuilder().addComponents(proofInput));
         await interaction.showModal(modal);
       }
 
-      // 3. УДАЛЕНИЕ (Админка)
+      // 3. УДАЛЕНИЕ
       if (interaction.customId.startsWith('delete_user_')) {
         await interaction.deferUpdate();
-
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
           return interaction.followUp({ content: 'Нет прав на удаление.', ephemeral: true });
         }
-
         const targetId = interaction.customId.split('_')[2];
         const deleted = await playerRepository.delete(targetId);
-
         if (deleted) {
           const embed = EmbedBuilder.from(interaction.message.embeds[0])
             .setColor(0x000000)
             .setTitle('❌ РЕГИСТРАЦИЯ ОТМЕНЕНА')
             .setDescription(`Администратор <@${interaction.user.id}> удалил этого пользователя из базы.`);
-          
           await interaction.editReply({ embeds: [embed], components: [] });
         } else {
           await interaction.followUp({ content: 'Пользователь уже удален или не найден.', ephemeral: true });
         }
       }
 
-      // 4. ВЫДАЧА НАГРАДЫ
+      // 4. ВЫДАЧА
       if (interaction.customId === 'give_reward') {
         await interaction.deferUpdate();
-        
         const oldEmbed = interaction.message.embeds[0];
         const disabledRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -160,14 +153,14 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // --- МОДАЛКИ (ФОРМЫ) ---
+    // --- МОДАЛКИ ---
     if (interaction.isModalSubmit()) {
       
       // ОБРАБОТКА РЕГИСТРАЦИИ
       if (interaction.customId === 'register_modal') {
         await interaction.deferReply({ ephemeral: true });
 
-        // Проверка на дубликат
+        // Проверяем дубль ПЕРЕД созданием
         const existing = await playerRepository.getById(interaction.user.id);
         if (existing) {
           return interaction.editReply(`⚠ Ты уже зарегистрирован как **${existing.nickname}**.`);
@@ -176,38 +169,45 @@ client.on('interactionCreate', async (interaction) => {
         const nick = interaction.fields.getTextInputValue('reg_nick');
         const stats = interaction.fields.getTextInputValue('reg_stats');
 
-        // Создаем игрока и проверяем результат!
-        const newPlayer = await playerRepository.create(interaction.user.id, nick, stats);
-
-        if (!newPlayer) {
-          // Если вернулся null, значит база данных отклонила запись
-          return interaction.editReply('❌ **Ошибка базы данных!** Регистрация не сохранена. Проверьте `MONGO_URI` или логи консоли.');
-        }
-
-        await interaction.editReply('✅ Регистрация успешна.');
-
         try {
-          const logChannel = await client.channels.fetch(LOG_CHANNEL_ID);
-          const logEmbed = new EmbedBuilder()
-            .setTitle('🆕 Новая регистрация')
-            .setColor(0x2ecc71)
-            .addFields(
-              { name: '👤 Ник', value: nick, inline: true },
-              { name: '🆔 Discord', value: `<@${interaction.user.id}>`, inline: true },
-              { name: '🔗 Статистика', value: stats }
-            )
-            .setTimestamp();
+          // Пытаемся создать
+          await playerRepository.create(interaction.user.id, nick, stats);
           
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`delete_user_${interaction.user.id}`)
-              .setLabel('❌ Удалить / Отменить')
-              .setStyle(ButtonStyle.Danger)
-          );
+          // Если дошли сюда, значит все ок
+          await interaction.editReply('✅ Регистрация успешна.');
 
-          await logChannel.send({ embeds: [logEmbed], components: [row] });
-        } catch (e) {
-          console.error('Ошибка логов:', e);
+          // Логи
+          try {
+            const logChannel = await client.channels.fetch(LOG_CHANNEL_ID);
+            const logEmbed = new EmbedBuilder()
+              .setTitle('🆕 Новая регистрация')
+              .setColor(0x2ecc71)
+              .addFields(
+                { name: '👤 Ник', value: nick, inline: true },
+                { name: '🆔 Discord', value: `<@${interaction.user.id}>`, inline: true },
+                { name: '🔗 Статистика', value: stats }
+              )
+              .setTimestamp();
+            const row = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`delete_user_${interaction.user.id}`)
+                .setLabel('❌ Удалить / Отменить')
+                .setStyle(ButtonStyle.Danger)
+            );
+            await logChannel.send({ embeds: [logEmbed], components: [row] });
+          } catch (logErr) {
+            console.error('Ошибка логов:', logErr);
+          }
+
+        } catch (dbError) {
+          // ВОТ ЗДЕСЬ МЫ ЛОВИМ ОШИБКУ БАЗЫ
+          console.error('DB Error:', dbError);
+
+          if (dbError.code === 11000) {
+            return interaction.editReply('❌ **Ошибка:** Такой пользователь уже есть в базе (дубликат).');
+          }
+          // Выводим реальный текст ошибки пользователю
+          return interaction.editReply(`❌ **Критическая ошибка базы данных:**\n\`${dbError.message}\`\n\nПроверь MongoDB IP Whitelist или пароль.`);
         }
       }
 
@@ -216,9 +216,8 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
 
         const player = await playerRepository.getById(interaction.user.id);
-        
         if (!player) {
-           return interaction.editReply('❌ Ошибка: Ты не зарегистрирован в базе данных. Попробуй пройти регистрацию снова.');
+           return interaction.editReply('❌ Ошибка: Ты не зарегистрирован в базе данных.');
         }
 
         try {
@@ -253,7 +252,7 @@ client.on('interactionCreate', async (interaction) => {
   } catch (error) {
     console.error('Interaction Error:', error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'Произошла критическая ошибка бота.', ephemeral: true }).catch(() => {});
+      await interaction.reply({ content: 'Критическая ошибка бота.', ephemeral: true }).catch(() => {});
     }
   }
 });
